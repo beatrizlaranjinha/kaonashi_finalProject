@@ -45,17 +45,11 @@ The smart contract never learns which movie a voter selected. It only verifies t
 
 This project was developed as the Final Project of my Computer Science degree at Universidade da Beira Interior. Check out the [report](./report.pdf) for a full technical breakdown of the cryptographic design, voting flow and system architecture.
 
-<table align="center">
-  <tr>
-    <td width="46%" align="center">
-      <img src="./assets/home-page.png" alt="Kaonashi home page" width="100%">
-    </td>
-    <td width="4%"></td>
-    <td width="46%" align="center">
-      <img src="./assets/voting-page.png" alt="Kaonashi voting page" width="100%">
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="./assets/image1.png" alt="Kaonashi home page" width="45%">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="./assets/image2.png" alt="Kaonashi voting page" width="45%">
+</p>
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
