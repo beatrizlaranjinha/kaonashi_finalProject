@@ -148,8 +148,3 @@ This builds and serves the frontend, opening it automatically in your default br
 
 <!-- CONTRIBUTING -->
 
-## Contributing
-
-This project is fully **open-source**, so feel free to contribute, fork it, test it locally or adapt it to your own privacy-preserving voting experiments.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
