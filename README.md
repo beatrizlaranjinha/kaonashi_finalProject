@@ -50,7 +50,7 @@ This project was developed as the Final Project of my Computer Science degree at
   &nbsp;
   <img src="./assets/image6.png" alt="Kaonashi voting page" width="32%">
   &nbsp;
-  <img src="./assets/image7.png" alt="Kaonashi election panel" width="32%">
+  <img src="./assets/image10.png" alt="Kaonashi election panel" width="32%">
 </p>
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
