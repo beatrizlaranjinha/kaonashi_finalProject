@@ -57,7 +57,7 @@ Kaonashi is an encrypted voting system built on Solana, designed around movie ba
 
 The smart contract never learns which movie a voter selected. It only verifies that the encrypted vote is valid, rejects tampered submissions, prevents double voting, and updates the encrypted tally. When the election ends, the final encrypted results can be decrypted off-chain and the winning movie can be submitted back to the chain.
 
-This project was developed as the Final Project of my Computer Science degree at Universidade da Beira Interior. Check out the [report](./report.pdf) for a full technical breakdown of the cryptographic design, voting flow and system architecture.
+This project was developed as the Final Project of my Computer Science degree at Universidade da Beira Interior. Check out the [report](./50521_42.pdf) for a full technical breakdown of the cryptographic design, voting flow and system architecture.
 
 <p align="center">
   <img src="./assets/image5.png" alt="Kaonashi home page" width="32%">
