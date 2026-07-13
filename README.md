@@ -59,6 +59,8 @@ The smart contract never learns which movie a voter selected. It only verifies t
 
 This project was developed as the Final Project of my Computer Science degree at Universidade da Beira Interior. Check out the [report](./50521_42.pdf) for a full technical breakdown of the cryptographic design, voting flow and system architecture.
 
+You can watch a demo [here](https://youtu.be/iWaLOYdnPgs)!
+
 <p align="center">
   <img src="./assets/image5.png" alt="Kaonashi home page" width="32%">
   &nbsp;
