@@ -32,9 +32,3 @@ package-lock.json
 
 # Environment
 .env
-
-# zk-client build
-zk-client/target
-
-# Rust tests build
-rust-tests/target
