@@ -7,6 +7,7 @@ use crate::models::{
 };
 use solana_sdk::hash::hashv;
 use solana_zk_sdk::encryption::elgamal::ElGamalCiphertext;
+use std::time::{Duration, Instant};
 
 pub const MAX_BATCH_SIZE: usize = 10;
 
@@ -32,7 +33,11 @@ pub fn create_batch_for_decade(
     let leaves = votes.iter().map(batch_vote_leaf).collect::<Vec<String>>();
 
     let encrypted_batch_tally = create_encrypted_batch_tally(&votes)?;
+
+    let tree_start = Instant::now();
     let merkle_root = merkle_root(&leaves)?;
+    let tree_build_time = tree_start.elapsed();
+    println!("Merkle tree build: {:?}", tree_build_time);
 
     let batch_index = {
         let batches = keeping_votes.encrypted_vote_batches.lock().unwrap();
@@ -53,9 +58,12 @@ pub fn create_batch_for_decade(
     .to_string();
 
     let mut receipts = Vec::new();
+    let mut total_proof_time = Duration::ZERO;
 
     for (index, vote) in votes.iter().enumerate() {
+        let start = Instant::now();
         let proof = merkle_proof(&leaves, index)?;
+        total_proof_time += start.elapsed();
 
         receipts.push(VoteReceipt {
             vote_hash: vote.encrypted_vote_hash.clone(),
@@ -73,6 +81,32 @@ pub fn create_batch_for_decade(
                 .collect(),
         });
     }
+
+    println!(
+        "Average Merkle proof generation: {:?}",
+        total_proof_time / receipts.len() as u32
+    );
+
+    let mut total_verification_time = Duration::ZERO;
+    for receipt in &receipts {
+        let proof = receipt
+            .merkle_proof
+            .iter()
+            .map(|node| crate::merkle::MerkleProofNode {
+                hash: node.hash.clone(),
+                is_left: node.is_left,
+            })
+            .collect::<Vec<_>>();
+        let start = Instant::now();
+        let verified =
+            crate::merkle::verify_merkle_proof(&receipt.leaf_hash, &proof, &receipt.merkle_root);
+        total_verification_time += start.elapsed();
+        assert!(verified);
+    }
+    println!(
+        "Average Merkle proof verification: {:?}",
+        total_verification_time / receipts.len() as u32
+    );
 
     let batch = EncryptedVoteBatch {
         batch_id: batch_id.clone(),

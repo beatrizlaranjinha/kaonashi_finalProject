@@ -6,15 +6,6 @@ use crate::api::client::{
     get_results, verify_vote_receipt, ResultsResponse, VerifyReceiptResponse,
 };
 
-#[derive(Clone)]
-struct LocalReceipt {
-    decade_id: u8,
-    decade: String,
-    movie_index: String,
-    movie_title: String,
-    vote_hash: String,
-}
-
 // ---------------------------------------------------
 // Helpers
 // ---------------------------------------------------
@@ -30,33 +21,49 @@ fn decade_number(decade_id: u8) -> &'static str {
     }
 }
 
-fn result_status(result: &ResultsResponse) -> String {
+fn result_title(result: &ResultsResponse) -> String {
     if let Some(final_winner) = result.final_winner.clone() {
-        return format!("Final winner: {final_winner}");
+        return final_winner;
     }
 
     if let Some(winner) = result.winner.clone() {
-        return format!("Winner: {winner}");
+        return winner;
     }
 
     if result.tie_indices.len() >= 2 {
-        return "Tie pending resolution".to_string();
+        return "Tie pending".to_string();
     }
 
     if result.total_votes == 0 {
-        return "No votes".to_string();
+        return "No votes yet".to_string();
     }
 
-    "Results pending".to_string()
+    "Waiting for final result".to_string()
+}
+
+fn result_note(result: &ResultsResponse) -> &'static str {
+    if result.final_winner.is_some() {
+        "Final winner for this decade."
+    } else if result.winner.is_some() {
+        "Winner calculated from the current tally."
+    } else if result.tie_indices.len() >= 2 {
+        "This decade still needs tie resolution."
+    } else if result.total_votes == 0 {
+        "No confirmed votes were counted yet."
+    } else {
+        "The result is still being processed."
+    }
 }
 
 fn result_pill_label(result: &ResultsResponse) -> &'static str {
-    if result.final_winner.is_some() || result.winner.is_some() {
+    if result.final_winner.is_some() {
+        "Final"
+    } else if result.winner.is_some() {
         "Winner"
     } else if result.tie_indices.len() >= 2 {
         "Tie"
     } else {
-        "No votes"
+        "Pending"
     }
 }
 
@@ -70,54 +77,16 @@ fn result_pill_class(result: &ResultsResponse) -> &'static str {
     }
 }
 
-fn parse_local_receipts(public_key: &str) -> Vec<LocalReceipt> {
-    let window = leptos::prelude::window();
-
-    let Ok(Some(storage)) = window.local_storage() else {
-        return Vec::new();
-    };
-
-    let storage_key = format!("kaonashi_receipts:{public_key}");
-
-    let Some(raw_receipts) = storage.get_item(&storage_key).ok().flatten() else {
-        return Vec::new();
-    };
-
-    raw_receipts
-        .lines()
-        .filter_map(|line| {
-            let parts = line.split('|').collect::<Vec<&str>>();
-
-            if parts.len() != 5 {
-                return None;
-            }
-
-            let decade_id = parts[0].parse::<u8>().ok()?;
-
-            Some(LocalReceipt {
-                decade_id,
-                decade: parts[1].to_string(),
-                movie_index: parts[2].to_string(),
-                movie_title: parts[3].to_string(),
-                vote_hash: parts[4].to_string(),
-            })
-        })
-        .collect()
-}
-
 // ---------------------------------------------------
 // Results page
 // ---------------------------------------------------
 
 #[component]
 pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
+    let _ = page;
     let loading_results = RwSignal::new(true);
     let results_error = RwSignal::new(None::<String>);
     let decade_results = RwSignal::new(Vec::<ResultsResponse>::new());
-
-    let public_key_input = RwSignal::new(String::new());
-    let local_receipts = RwSignal::new(Vec::<LocalReceipt>::new());
-    let receipt_message = RwSignal::new(None::<String>);
 
     let receipt_hash_input = RwSignal::new(String::new());
     let verifying_receipt = RwSignal::new(false);
@@ -125,7 +94,7 @@ pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
     let verify_result = RwSignal::new(None::<VerifyReceiptResponse>);
 
     // ---------------------------------------------------
-    // Load final results
+    // Load public results
     // ---------------------------------------------------
 
     let load_results = move || {
@@ -159,40 +128,14 @@ pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
     });
 
     // ---------------------------------------------------
-    // Local receipts
-    // ---------------------------------------------------
-
-    let show_local_receipts = move |_| {
-        let public_key = public_key_input.get().trim().to_string();
-
-        if public_key.is_empty() {
-            receipt_message.set(Some("Enter your public key first.".to_string()));
-            local_receipts.set(Vec::new());
-            return;
-        }
-
-        let receipts = parse_local_receipts(&public_key);
-
-        if receipts.is_empty() {
-            receipt_message.set(Some(
-                "No local receipts found for this public key in this browser.".to_string(),
-            ));
-        } else {
-            receipt_message.set(Some(format!("{} local receipt(s) found.", receipts.len())));
-        }
-
-        local_receipts.set(receipts);
-    };
-
-    // ---------------------------------------------------
-    // Verify receipt
+    // Verify vote hash in Merkle tree
     // ---------------------------------------------------
 
     let verify_receipt = move |_| {
         let vote_hash = receipt_hash_input.get().trim().to_string();
 
         if vote_hash.is_empty() {
-            verify_error.set(Some("Insert a vote hash / receipt code first.".to_string()));
+            verify_error.set(Some("Paste your vote hash first.".to_string()));
             verify_result.set(None);
             return;
         }
@@ -218,30 +161,23 @@ pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
     view! {
         <section class="results-page">
             <div class="results-container">
-                <header class="movies-header">
-                    <button
-                        class="back-button"
-                        on:click=move |_| page.set("decades")
-                    >
-                        "← Back"
-                    </button>
-
-                    <div>
-                        <p class="chairperson-kicker">"Results"</p>
-                        <h1>"The final cut"</h1>
-                        <p>
-                            "See the final winners, recover your local receipt codes, and verify that your encrypted vote made it into the batch."
-                        </p>
-                    </div>
+                <header class="results-hero">
+                    <p class="chairperson-kicker">"Results"</p>
+                    <h1>"The final cut"</h1>
+                    <p class="results-hero-text">
+                    </p>
                 </header>
 
                 // ---------------------------------------------------
-                // Final winners
+                // Winners
                 // ---------------------------------------------------
 
-                <section class="results-section">
+                <section class="results-block results-winners-block">
                     <div class="results-section-header">
-                        <h2>"Final winners by decade"</h2>
+                        <div>
+                            <p class="results-section-kicker">"Public tally"</p>
+                            <h2>"Winners by decade"</h2>
+                        </div>
 
                         <button
                             class="results-small-button"
@@ -261,8 +197,8 @@ pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
                     {move || {
                         if loading_results.get() {
                             view! {
-                                <p class="chairperson-empty">
-                                    "Loading final results..."
+                                <p class="results-empty-message">
+                                    "Loading results..."
                                 </p>
                             }
                             .into_any()
@@ -275,38 +211,41 @@ pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
                             .into_any()
                         } else {
                             view! {
-                                <div class="results-grid">
+                                <div class="results-list">
                                     {decade_results
                                         .get()
                                         .into_iter()
                                         .map(|result| {
                                             let decade_label = format!(
                                                 "{}s",
-                                                decade_number(result.decade_id)
+                                                decade_number(result.decade_id),
                                             );
-
-                                            let status = result_status(&result);
+                                            let title = result_title(&result);
+                                            let note = result_note(&result);
                                             let pill_label = result_pill_label(&result);
                                             let pill_class = result_pill_class(&result);
 
                                             view! {
-                                                <article class="result-card">
-                                                    <div class="result-card-top">
+                                                <article class="result-row">
+                                                    <div class="result-row-main">
                                                         <span class="result-decade">
                                                             {decade_label}
                                                         </span>
 
+                                                        <h3>{title}</h3>
+                                                        <p>{note}</p>
+                                                    </div>
+
+                                                    <div class="result-row-meta">
                                                         <span class=pill_class>
                                                             {pill_label}
                                                         </span>
+
+                                                        <div class="result-votes">
+                                                            <span>"Votes"</span>
+                                                            <strong>{result.total_votes}</strong>
+                                                        </div>
                                                     </div>
-
-                                                    <h3>{status}</h3>
-
-                                                    <p>
-                                                        "Total votes: "
-                                                        <strong>{result.total_votes}</strong>
-                                                    </p>
                                                 </article>
                                             }
                                         })
@@ -319,106 +258,25 @@ pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
                 </section>
 
                 // ---------------------------------------------------
-                // Local receipts
+                // Merkle verification
                 // ---------------------------------------------------
 
-                <section class="results-section">
-                    <div class="results-section-header">
-                        <h2>"Your local voting receipts"</h2>
+                <section class="results-block results-verification-block">
+                    <div class="results-section-header results-section-header-simple">
+                        <div>
+                            <p class="results-section-kicker">"Merkle proof"</p>
+                            <h2>"Verify your vote"</h2>
+                        </div>
                     </div>
 
                     <p class="results-muted">
-                        "Enter your public key to see receipt codes saved locally in this browser."
                     </p>
 
                     <div class="results-form-row">
                         <input
                             class="results-input"
                             type="text"
-                            placeholder="Public key"
-                            prop:value=move || public_key_input.get()
-                            on:input=move |event| {
-                                public_key_input.set(event_target_value(&event));
-                            }
-                        />
-
-                        <button
-                            class="submit-vote-btn results-action-button"
-                            on:click=show_local_receipts
-                        >
-                            "Show my receipts"
-                        </button>
-                    </div>
-
-                    {move || {
-                        receipt_message.get().map(|message| {
-                            view! {
-                                <p class="vote-success">
-                                    {message}
-                                </p>
-                            }
-                        })
-                    }}
-
-                    {move || {
-                        if local_receipts.get().is_empty() {
-                            view! { <div></div> }.into_any()
-                        } else {
-                            view! {
-                                <div class="receipt-list">
-                                    {local_receipts
-                                        .get()
-                                        .into_iter()
-                                        .map(|receipt| {
-                                            view! {
-                                                <article class="receipt-card">
-                                                    <div class="receipt-card-top">
-                                                        <span>{receipt.decade}</span>
-                                                        <span>
-                                                            "Movie index "
-                                                            {receipt.movie_index}
-                                                        </span>
-                                                    </div>
-
-                                                    <h3>{receipt.movie_title}</h3>
-
-                                                    <p class="results-muted">
-                                                        "Receipt for decade id "
-                                                        {receipt.decade_id}
-                                                    </p>
-
-                                                    <p class="receipt-code">
-                                                        {receipt.vote_hash}
-                                                    </p>
-                                                </article>
-                                            }
-                                        })
-                                        .collect_view()}
-                                </div>
-                            }
-                            .into_any()
-                        }
-                    }}
-                </section>
-
-                // ---------------------------------------------------
-                // Receipt verification
-                // ---------------------------------------------------
-
-                <section class="results-section">
-                    <div class="results-section-header">
-                        <h2>"Verify your receipt"</h2>
-                    </div>
-
-                    <p class="results-muted">
-                        "Paste your vote hash / receipt code to verify that your encrypted vote was included in a batch."
-                    </p>
-
-                    <div class="results-form-row">
-                        <input
-                            class="results-input"
-                            type="text"
-                            placeholder="Vote hash / receipt code"
+                            placeholder="Vote hash"
                             prop:value=move || receipt_hash_input.get()
                             on:input=move |event| {
                                 receipt_hash_input.set(event_target_value(&event));
@@ -434,7 +292,7 @@ pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
                                 if verifying_receipt.get() {
                                     "Verifying..."
                                 } else {
-                                    "Verify receipt"
+                                    "Verify"
                                 }
                             }}
                         </button>
@@ -452,40 +310,46 @@ pub fn ResultsPage(page: RwSignal<&'static str>) -> impl IntoView {
 
                     {move || {
                         verify_result.get().map(|result| {
+                            let pill_class = if result.verified {
+                                "result-pill finalized"
+                            } else {
+                                "result-pill tie"
+                            };
+                            let pill_label = if result.verified {
+                                "Verified"
+                            } else {
+                                "Not found"
+                            };
+                            let message = if result.verified {
+                                "Your encrypted vote was included in the Merkle tree."
+                            } else {
+                                "This hash was not found in the Merkle tree."
+                            };
+
                             view! {
-                                <div class="receipt-verification-card">
-                                    <span class=move || {
-                                        if result.verified {
-                                            "result-pill finalized"
-                                        } else {
-                                            "result-pill tie"
-                                        }
-                                    }>
-                                        {if result.verified {
-                                            "Verified"
-                                        } else {
-                                            "Not verified"
-                                        }}
-                                    </span>
+                                <article class="verification-result">
+                                    <div class="verification-result-main">
+                                        <span class=pill_class>{pill_label}</span>
+                                        <p>{message}</p>
+                                    </div>
 
-                                    <p>
-                                        <strong>"Status: "</strong>
-                                        {result.status}
-                                    </p>
+                                    <div class="verification-detail-grid">
+                                        <div>
+                                            <span>"Status"</span>
+                                            <strong>{result.status}</strong>
+                                        </div>
 
-                                    <p>
-                                        <strong>"Batch ID: "</strong>
-                                        {result.batch_id}
-                                    </p>
+                                        <div>
+                                            <span>"Batch"</span>
+                                            <strong>{result.batch_id}</strong>
+                                        </div>
+                                    </div>
 
-                                    <p>
-                                        <strong>"Merkle root:"</strong>
-                                    </p>
-
-                                    <p class="receipt-code">
-                                        {result.merkle_root}
-                                    </p>
-                                </div>
+                                    <div class="verification-root">
+                                        <span>"Merkle root"</span>
+                                        <p class="receipt-code">{result.merkle_root}</p>
+                                    </div>
+                                </article>
                             }
                         })
                     }}

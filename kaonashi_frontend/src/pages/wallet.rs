@@ -60,7 +60,7 @@ pub fn WalletPage(
                 </h1>
 
                 <p class="wallet-login-description">
-                    "Enter the wallet ID and public key. The private key is only used when casting a vote."
+
                 </p>
 
                 <div class="wallet-login-divider"></div>
@@ -109,7 +109,7 @@ pub fn WalletPage(
                     }}
                 </button>
                 <p class="wallet-login-note">
-                    "The private key is not stored. It will only be requested when submitting a vote."
+
                 </p>
             </div>
         </section>

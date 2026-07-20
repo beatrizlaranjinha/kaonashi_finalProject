@@ -18,3 +18,5 @@ default = []
 [dependencies]
 anchor-lang = "0.32.1"
 solana-curve25519 = "4.0.0"
+curve25519-dalek = "4.1"
+sha2 = "0.10"

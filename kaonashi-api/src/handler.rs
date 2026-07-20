@@ -23,14 +23,7 @@ use crate::models::{
 use crate::movies::movies_decades;
 use crate::zk_verify::verify_encrypted_vote_proofs;
 
-// ------------------------------------------------------------
-// Local API state helpers
-// ------------------------------------------------------------
-//
-// These flags live in memory, like the rest of the current API state.
-// create_ballots opens the election.
-// close_election closes it.
-// submit_vote checks both conditions before accepting votes.
+// Local API state
 
 const DECADE_COUNT: usize = 6;
 
@@ -40,9 +33,7 @@ static ELECTION_CLOSED_BY_DECADE: LazyLock<Mutex<Vec<bool>>> =
 static RESOLVED_TIES_BY_DECADE: LazyLock<Mutex<Vec<Option<usize>>>> =
     LazyLock::new(|| Mutex::new(vec![None; DECADE_COUNT]));
 
-// ------------------------------------------------------------
-// Local response structs
-// ------------------------------------------------------------
+// Local response types
 
 #[derive(Debug, Serialize)]
 pub struct DecadeOperationResult {
@@ -90,14 +81,15 @@ pub struct FinalizeElectionResponse {
     pub results: Vec<DecadeOperationResult>,
     pub status: String,
 }
-#[derive(Debug, serde::Serialize)]
+
+#[derive(Debug, Serialize)]
 pub struct MovieResult {
     pub index: usize,
     pub title: String,
     pub votes: u64,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ResultsResponse {
     pub decade_id: u8,
     pub decade: String,
@@ -111,22 +103,16 @@ pub struct ResultsResponse {
     pub results: Vec<MovieResult>,
 }
 
-// ------------------------------------------------------------
 // Basic API
-// ------------------------------------------------------------
 
-// Health check endpoint.
-// Used only to confirm that the API server is running.
+// Confirms that the API server is running.
 pub async fn is_running() -> &'static str {
     "api is indeed running"
 }
 
-// ------------------------------------------------------------
 // ElGamal public key
-// ------------------------------------------------------------
 
 // Returns the ElGamal public key for a decade.
-// The frontend needs this key to encrypt the vote before submitting it.
 pub async fn get_elgamal_public_key(
     Path(decade_id): Path<u8>,
     State(keeping_votes): State<Arc<KeepingVotes>>,
@@ -148,21 +134,9 @@ pub async fn get_elgamal_public_key(
     }))
 }
 
-// ------------------------------------------------------------
 // Vote submission
-// ------------------------------------------------------------
 
-// Receives an encrypted vote from the frontend.
-// This function checks:
-// 1. the decade exists;
-// 2. the chairperson already created the ballots;
-// 3. the election is not closed;
-// 4. the encrypted vote has the correct shape;
-// 5. the encrypted vote hash matches;
-// 6. the signed message matches the vote;
-// 7. the wallet signature is valid;
-// 8. the ZK proofs are valid;
-// 9. the vote can be stored as pending encrypted vote.
+// Receives, validates and stores an encrypted vote.
 pub async fn submit_vote(
     State(keeping_votes): State<Arc<KeepingVotes>>,
     Json(vote): Json<SubmittedVote>,
@@ -179,8 +153,7 @@ pub async fn submit_vote(
         ));
     };
 
-    // Important fix:
-    // Users cannot vote before the chairperson creates the ballots.
+    // The election must be created before users can vote.
     if !ballot_exists(keeping_votes.as_ref(), vote.decade_id) {
         return Json(vote_response(
             false,
@@ -193,7 +166,7 @@ pub async fn submit_vote(
         ));
     }
 
-    // After close_election, new votes are rejected.
+    // Closed elections reject new votes.
     if is_decade_closed(vote.decade_id) {
         return Json(vote_response(
             false,
@@ -346,7 +319,7 @@ pub async fn submit_vote(
 
     drop(pending_votes);
 
-    // If enough pending votes exist, the API automatically creates a batch.
+    // Automatically creates a batch when the batch size is reached.
     let batch_submitted = if pending_votes_count >= MAX_BATCH_SIZE {
         match create_batch_for_decade(keeping_votes.as_ref(), vote.decade_id) {
             Ok(Some(_)) => true,
@@ -375,7 +348,7 @@ pub async fn submit_vote(
     ))
 }
 
-// Creates the standard response used by submit_vote.
+// Creates the standard vote response.
 fn vote_response(
     accepted: bool,
     wallet_id: String,
@@ -398,8 +371,7 @@ fn vote_response(
     }
 }
 
-// Converts the encrypted vote received through JSON into the internal format.
-// Each ciphertext must have exactly 64 bytes.
+// Converts JSON ciphertexts into the internal encrypted vote format.
 fn normalize_encrypted_vote(
     encrypted_vote: &[Vec<u8>],
     proposal_count: usize,
@@ -430,8 +402,7 @@ fn normalize_encrypted_vote(
         .collect()
 }
 
-// Computes the hash of the encrypted vote.
-// This hash is what the voter signs.
+// Computes the hash that the voter signs.
 fn hash_encrypted_vote(encrypted_vote: &[[u8; 64]]) -> String {
     let mut hasher = Sha256::new();
 
@@ -442,12 +413,9 @@ fn hash_encrypted_vote(encrypted_vote: &[[u8; 64]]) -> String {
     hex::encode(hasher.finalize())
 }
 
-// ------------------------------------------------------------
 // Batches
-// ------------------------------------------------------------
 
-// Manually creates a batch for one decade.
-// This is used when there are pending votes that did not reach MAX_BATCH_SIZE.
+// Creates a batch for one decade.
 pub async fn flush_batch(
     Path(decade_id): Path<u8>,
     State(keeping_votes): State<Arc<KeepingVotes>>,
@@ -496,7 +464,7 @@ pub async fn flush_batch(
     }
 }
 
-// Manually creates pending batches for all decades.
+// Creates pending batches for all decades.
 pub async fn flush_batches(
     State(keeping_votes): State<Arc<KeepingVotes>>,
     Json(admin): Json<AdminActionRequest>,
@@ -571,7 +539,7 @@ pub async fn flush_batches(
     })
 }
 
-// Creates an empty flush response for error or no-op cases.
+// Creates an empty batch response for errors or no pending votes.
 fn empty_flush_response(success: bool, decade_id: u8, status: String) -> FlushBatchResponse {
     FlushBatchResponse {
         success,
@@ -585,11 +553,9 @@ fn empty_flush_response(success: bool, decade_id: u8, status: String) -> FlushBa
     }
 }
 
-// ------------------------------------------------------------
 // Vote receipts
-// ------------------------------------------------------------
 
-// Returns the receipt of a vote using the encrypted vote hash.
+// Returns the receipt of a vote using its hash.
 pub async fn get_vote_receipt(
     Path(vote_hash): Path<String>,
     State(keeping_votes): State<Arc<KeepingVotes>>,
@@ -599,7 +565,7 @@ pub async fn get_vote_receipt(
     Json(receipts.get(&vote_hash).cloned())
 }
 
-// Verifies that a stored vote receipt reconstructs the Merkle root.
+// Verifies that a vote receipt matches its Merkle root.
 pub async fn verify_vote_receipt(
     State(keeping_votes): State<Arc<KeepingVotes>>,
     Json(payload): Json<VerifyReceiptRequest>,
@@ -640,12 +606,9 @@ pub async fn verify_vote_receipt(
     })
 }
 
-// ------------------------------------------------------------
-// Old/plain result endpoints
-// ------------------------------------------------------------
+// Results
 
-// Returns the old plaintext vote counts.
-// This is kept for debugging and compatibility with older frontend pages.
+// Returns the current vote counts for one decade.
 pub async fn get_results(
     Path(decade_id): Path<u8>,
     State(keeping_votes): State<Arc<KeepingVotes>>,
@@ -667,6 +630,7 @@ pub async fn get_results(
 
     let selected_votes = {
         let votes = keeping_votes.votes_by_decade.lock().unwrap();
+
         votes[decade_id as usize].clone()
     };
 
@@ -734,8 +698,7 @@ pub async fn get_results(
     })
 }
 
-// Returns the old plaintext winner.
-// This is kept for debugging and compatibility with older frontend pages.
+// Returns the winner text for one decade.
 pub async fn get_winner(
     Path(decade_id): Path<u8>,
     State(keeping_votes): State<Arc<KeepingVotes>>,
@@ -786,7 +749,7 @@ pub async fn get_winner(
     )
 }
 
-// Returns the movie list for a decade.
+// Returns the movie list for one decade.
 pub async fn get_movies(Path(decade_id): Path<u8>) -> Json<Option<Vec<String>>> {
     let movies = movies_decades(decade_id)
         .map(|movies| movies.iter().map(|movie| movie.to_string()).collect());
@@ -794,12 +757,9 @@ pub async fn get_movies(Path(decade_id): Path<u8>) -> Json<Option<Vec<String>>> 
     Json(movies)
 }
 
-// ------------------------------------------------------------
 // Chairperson actions
-// ------------------------------------------------------------
 
 // Creates all on-chain ballots.
-// After this succeeds, the election becomes ready to receive votes.
 pub async fn create_ballots(
     State(keeping_votes): State<Arc<KeepingVotes>>,
     Json(admin): Json<AdminActionRequest>,
@@ -847,7 +807,7 @@ pub async fn create_ballots(
                 }
             }
 
-            // Create ballots means the election is ready/open.
+            // Creating ballots opens the election.
             {
                 let mut closed = ELECTION_CLOSED_BY_DECADE.lock().unwrap();
 
@@ -856,6 +816,7 @@ pub async fn create_ballots(
                 }
             }
 
+            // A new election starts without resolved ties.
             {
                 let mut resolved_ties = RESOLVED_TIES_BY_DECADE.lock().unwrap();
 
@@ -874,7 +835,6 @@ pub async fn create_ballots(
 }
 
 // Closes the election for all decades.
-// After this, submit_vote rejects new votes.
 pub async fn close_election(
     State(keeping_votes): State<Arc<KeepingVotes>>,
     Json(admin): Json<AdminActionRequest>,
@@ -922,6 +882,7 @@ pub async fn close_election(
             Ok(Ok(())) => {
                 {
                     let mut closed = ELECTION_CLOSED_BY_DECADE.lock().unwrap();
+
                     closed[decade_id as usize] = true;
                 }
 
@@ -958,8 +919,8 @@ pub async fn close_election(
         status: format!("Election closed across {} decade ballot(s).", closed_count),
     })
 }
+
 // Stores the chairperson decision for a tied decade.
-// This records which movie index should be used as the tie winner.
 pub async fn resolve_tie(Json(payload): Json<ResolveTieRequest>) -> Json<ResolveTieResponse> {
     if let Err(error) = verify_chairperson_action(
         &payload.public_key,
@@ -1012,11 +973,6 @@ pub async fn resolve_tie(Json(payload): Json<ResolveTieRequest>) -> Json<Resolve
 }
 
 // Finalizes all decade elections.
-// This is the endpoint used by the chairperson frontend button.
-// Finalizes all decade elections.
-// This is the endpoint used by the chairperson frontend button.
-// Finalizes all decade elections.
-// This decrypts the encrypted tallies and detects Finalized / Tie / NoVotes.
 pub async fn finalize_election(
     State(keeping_votes): State<Arc<KeepingVotes>>,
     Json(admin): Json<AdminActionRequest>,
@@ -1060,9 +1016,7 @@ pub async fn finalize_election(
 
         let response = finalize_decade_from_state(keeping_votes.clone(), decade_id).await;
 
-        // Important:
-        // Store the decrypted tally locally so /api/results/{decade_id}
-        // and the tie-resolution page can read the real results.
+        // Saves decrypted results so the results page can read them.
         if !response.results.is_empty() {
             let mut votes = keeping_votes.votes_by_decade.lock().unwrap();
 
@@ -1108,8 +1062,8 @@ pub async fn finalize_election(
     })
 }
 
-// Optional compatibility endpoint.
-// Use this if you still keep a route like /api/admin/finalize-election/{decade_id}.
+// Finalizes only one decade.
+// This keeps the old finalize-by-decade route available.
 pub async fn finalize_election_for_decade(
     Path(decade_id): Path<u8>,
     State(keeping_votes): State<Arc<KeepingVotes>>,
@@ -1137,10 +1091,7 @@ pub async fn finalize_election_for_decade(
     Json(finalize_decade_from_state(keeping_votes, decade_id).await)
 }
 
-// Finalizes one decade by reading the on-chain encrypted tally
-// and decrypting it with the API's ElGamal secret key.
-// Finalizes one decade by reading the on-chain encrypted tally
-// and decrypting it with the API's ElGamal secret key.
+// Reads and decrypts the on-chain encrypted tally for one decade.
 async fn finalize_decade_from_state(
     keeping_votes: Arc<KeepingVotes>,
     decade_id: u8,
@@ -1220,12 +1171,10 @@ async fn finalize_decade_from_state(
         },
     }
 }
-// ------------------------------------------------------------
+
 // Authentication
-// ------------------------------------------------------------
 
 // Creates a login challenge message for a wallet.
-// The frontend asks the user to sign this message.
 pub async fn create_auth_challenge(
     State(keeping_votes): State<Arc<KeepingVotes>>,
     Json(payload): Json<ChallengeRequest>,
@@ -1244,8 +1193,7 @@ pub async fn create_auth_challenge(
     })
 }
 
-// Verifies the login signature.
-// If the signature is valid, the wallet is authenticated.
+// Verifies the wallet login signature.
 pub async fn login_with_signature(
     State(keeping_votes): State<Arc<KeepingVotes>>,
     Json(payload): Json<LoginRequest>,
@@ -1272,12 +1220,9 @@ pub async fn login_with_signature(
     }))
 }
 
-// ------------------------------------------------------------
 // Blockchain state
-// ------------------------------------------------------------
 
-// Reads the on-chain ballot state for a decade.
-// Useful for debugging and confirming that batches reached the blockchain.
+// Reads the on-chain ballot state for one decade.
 pub async fn get_blockchain_ballot(
     Path(decade_id): Path<u8>,
     State(keeping_votes): State<Arc<KeepingVotes>>,
@@ -1336,12 +1281,9 @@ pub async fn get_blockchain_ballot(
     }
 }
 
-// ------------------------------------------------------------
 // Chairperson status
-// ------------------------------------------------------------
 
-// Checks whether a given public key is the configured chairperson.
-// This is used only for frontend routing.
+// Checks whether a public key is the configured chairperson.
 pub async fn get_chairperson_status(
     Path(public_key): Path<String>,
 ) -> Json<ChairpersonStatusResponse> {
@@ -1355,8 +1297,9 @@ pub async fn get_chairperson_status(
     })
 }
 
-// Compatibility endpoint.
-// Since voting is optional, the election does not require every voter to vote.
+// Election completion
+
+// Keeps the old election completion endpoint available.
 pub async fn get_election_completion() -> Json<ElectionCompletionResponse> {
     Json(ElectionCompletionResponse {
         complete: true,
@@ -1366,11 +1309,9 @@ pub async fn get_election_completion() -> Json<ElectionCompletionResponse> {
     })
 }
 
-// ------------------------------------------------------------
 // Internal helpers
-// ------------------------------------------------------------
 
-// Checks if the API has an on-chain ballot stored for a given decade.
+// Checks if a decade already has an on-chain ballot.
 fn ballot_exists(keeping_votes: &KeepingVotes, decade_id: u8) -> bool {
     let ballots = keeping_votes.ballots_by_decade.lock().unwrap();
 
@@ -1380,28 +1321,28 @@ fn ballot_exists(keeping_votes: &KeepingVotes, decade_id: u8) -> bool {
         .is_some()
 }
 
-// Checks if all decade ballots already exist in API memory.
+// Checks if all decade ballots exist.
 fn all_ballots_exist(keeping_votes: &KeepingVotes) -> bool {
     let ballots = keeping_votes.ballots_by_decade.lock().unwrap();
 
     ballots.iter().all(|ballot| ballot.is_some())
 }
 
-// Checks if a decade is currently closed.
+// Checks if a decade is closed.
 fn is_decade_closed(decade_id: u8) -> bool {
     let closed = ELECTION_CLOSED_BY_DECADE.lock().unwrap();
 
     closed.get(decade_id as usize).copied().unwrap_or(false)
 }
 
-// Returns a resolved tie winner, if the chairperson already chose one.
+// Returns the resolved winner for a tied decade.
 fn get_resolved_tie(decade_id: u8) -> Option<usize> {
     let resolved_ties = RESOLVED_TIES_BY_DECADE.lock().unwrap();
 
     resolved_ties.get(decade_id as usize).copied().flatten()
 }
 
-// Converts decade_id to a readable decade label.
+// Converts a decade id into a readable label.
 fn decade_label(decade_id: u8) -> &'static str {
     match decade_id {
         0 => "1970",

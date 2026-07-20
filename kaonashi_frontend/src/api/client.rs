@@ -12,18 +12,14 @@ use solana_zk_sdk::encryption::elgamal::ElGamalPubkey;
 
 const API_BASE_URL: &str = "http://127.0.0.1:3000";
 
-// =======================================================
-// API ERRORS
-// =======================================================
+// API errors
 
 #[derive(Debug, Deserialize)]
 pub struct ApiErrorResponse {
     pub error: String,
 }
 
-// =======================================================
-// WALLET AUTHENTICATION
-// =======================================================
+// Wallet authentication types
 
 #[derive(Debug, Serialize)]
 pub struct ChallengeRequest {
@@ -49,13 +45,13 @@ pub struct WalletLoginResponse {
     pub public_key: String,
 
     // Some backend responses may not include a token.
-    // This keeps the frontend compatible with both versions.
     #[serde(default)]
     pub token: String,
 }
 
-// Requests a challenge from the backend, signs it with the wallet private key,
-// and sends the signed message back to authenticate the wallet.
+// Wallet authentication functions
+
+// Requests a challenge from the backend and signs it with the wallet private key.
 pub async fn login_wallet(
     public_key: String,
     secret_key: String,
@@ -129,9 +125,7 @@ pub async fn login_wallet(
     }
 }
 
-// =======================================================
-// CHAIRPERSON STATUS
-// =======================================================
+// Chairperson status types
 
 #[derive(Debug, Deserialize)]
 pub struct ChairpersonStatusResponse {
@@ -139,8 +133,9 @@ pub struct ChairpersonStatusResponse {
     pub is_chairperson: bool,
 }
 
-// Checks if the connected public key is the configured chairperson.
-// This is only used for frontend routing.
+// Chairperson status functions
+
+// Checks if the connected wallet is the chairperson.
 pub async fn get_chairperson_status(
     public_key: String,
 ) -> Result<ChairpersonStatusResponse, String> {
@@ -168,9 +163,7 @@ pub async fn get_chairperson_status(
     }
 }
 
-// =======================================================
-// ENCRYPTED VOTING
-// =======================================================
+// Encrypted voting types
 
 #[derive(Debug, Deserialize)]
 pub struct ElGamalPublicKeyResponse {
@@ -231,8 +224,6 @@ pub struct SubmitVoteResponse {
     #[serde(default)]
     pub encrypted_vote_hash: String,
 
-    // This was the field causing the frontend crash.
-    // It is now defaulted so the frontend does not fail if the backend omits it.
     #[serde(default)]
     pub decade: String,
 
@@ -251,8 +242,10 @@ pub struct SubmitVoteResponse {
     #[serde(default)]
     pub batch_submitted: bool,
 }
+
+// Encrypted voting helpers
+
 // Fetches the ElGamal public key for the selected decade.
-// The frontend uses this key to encrypt the vote locally.
 async fn get_elgamal_public_key(decade_id: u8) -> Result<ElGamalPubkey, String> {
     let response = Request::get(&format!(
         "{API_BASE_URL}/api/election/{decade_id}/elgamal-public-key"
@@ -288,8 +281,9 @@ async fn get_elgamal_public_key(decade_id: u8) -> Result<ElGamalPubkey, String> 
         .map_err(|_| "Invalid ElGamal public key bytes".to_string())
 }
 
-// Creates a one-hot vote vector, encrypts it, generates ZK proofs,
-// signs the encrypted vote hash, and submits everything to the backend.
+// Encrypted voting functions
+
+// Encrypts the vote, generates proofs, signs the hash and submits it.
 pub async fn submit_vote(
     wallet_id: String,
     public_key: String,
@@ -363,17 +357,13 @@ pub async fn submit_vote(
             .await
             .map_err(|error| format!("Invalid API response: {error}"))?;
 
-        // The backend does not need to return the selected movie.
-        // The frontend already knows it, so we fill it here for display.
-        // The backend does not need to return the selected movie.
-        // The frontend already knows it, so we fill it here for display.
+        // The frontend already knows the selected movie.
         if vote_response.movie.is_empty() {
             vote_response.movie = movie_name;
             vote_response.movie_index = movie_index;
         }
 
-        // The frontend already computed the encrypted vote hash.
-        // We keep it in the response so the UI can show it as the user's receipt code.
+        // The frontend already computed the vote hash.
         if vote_response.encrypted_vote_hash.is_empty() {
             vote_response.encrypted_vote_hash = encrypted_vote_hash;
         }
@@ -389,9 +379,7 @@ pub async fn submit_vote(
     }
 }
 
-// =======================================================
-// ADMIN SIGNED REQUESTS
-// =======================================================
+// Admin signed request types
 
 #[derive(Debug, Serialize)]
 pub struct AdminActionRequest {
@@ -400,8 +388,9 @@ pub struct AdminActionRequest {
     pub signature: String,
 }
 
+// Admin signed request helpers
+
 // Builds the exact admin message expected by the backend.
-// The action name must match the backend action string exactly.
 fn create_admin_message(public_key: &str, action: &str, decade_id: Option<u8>) -> String {
     match decade_id {
         Some(decade_id) => format!(
@@ -416,7 +405,6 @@ fn create_admin_message(public_key: &str, action: &str, decade_id: Option<u8>) -
 }
 
 // Creates a signed admin request using the chairperson private key.
-// The private key stays in the frontend and is only used locally for signing.
 fn create_signed_admin_request(
     public_key: &str,
     secret_key: &str,
@@ -433,9 +421,19 @@ fn create_signed_admin_request(
     })
 }
 
-// =======================================================
-// BATCHES
-// =======================================================
+// Batch types
+
+#[derive(Debug, Deserialize)]
+pub struct VoteReceiptResponse {
+    #[serde(default)]
+    pub vote_hash: String,
+
+    #[serde(default)]
+    pub batch_id: String,
+
+    #[serde(default)]
+    pub merkle_root: String,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct FlushBatchResponse {
@@ -476,18 +474,6 @@ pub struct FlushBatchResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct VoteReceiptResponse {
-    #[serde(default)]
-    pub vote_hash: String,
-
-    #[serde(default)]
-    pub batch_id: String,
-
-    #[serde(default)]
-    pub merkle_root: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct FlushBatchesResponse {
     pub success: bool,
 
@@ -503,6 +489,8 @@ pub struct FlushBatchesResponse {
     #[serde(default)]
     pub status: String,
 }
+
+// Batch functions
 
 // Submits the pending batch of one decade.
 pub async fn flush_batch(
@@ -569,9 +557,7 @@ pub async fn flush_batches(
     }
 }
 
-// =======================================================
-// RESULTS
-// =======================================================
+// Results types
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct MovieResult {
@@ -612,12 +598,9 @@ pub struct ResultsResponse {
     pub results: Vec<MovieResult>,
 }
 
+// Results functions
+
 // Fetches the decrypted results for one decade.
-//
-// NOTE:
-// This expects /api/results/{decade_id} to return JSON.
-// If the backend still returns plaintext lines like "Movie:0",
-// the backend endpoint must be updated before the tie-resolution page works.
 pub async fn get_results(decade_id: u8) -> Result<ResultsResponse, String> {
     let response = Request::get(&format!("{API_BASE_URL}/api/results/{decade_id}"))
         .send()
@@ -639,9 +622,7 @@ pub async fn get_results(decade_id: u8) -> Result<ResultsResponse, String> {
     }
 }
 
-// =======================================================
-// TIE RESOLUTION
-// =======================================================
+// Tie resolution types
 
 #[derive(Debug, Serialize)]
 pub struct ResolveTieRequest {
@@ -661,6 +642,8 @@ pub struct ResolveTieResponse {
     #[serde(default)]
     pub status: String,
 }
+
+// Tie resolution functions
 
 // Resolves a tie by signing the chairperson's chosen winner.
 pub async fn resolve_tie(
@@ -704,9 +687,7 @@ pub async fn resolve_tie(
     }
 }
 
-// =======================================================
-// RECEIPTS
-// =======================================================
+// Receipt types
 
 #[derive(Debug, Serialize)]
 pub struct VerifyReceiptRequest {
@@ -742,6 +723,8 @@ pub struct VerifyReceiptResponse {
     #[serde(default)]
     pub status: String,
 }
+
+// Receipt functions
 
 // Fetches a stored receipt by vote hash.
 pub async fn get_vote_receipt(
@@ -791,9 +774,8 @@ pub async fn verify_vote_receipt(vote_hash: String) -> Result<VerifyReceiptRespo
         }
     }
 }
-// =======================================================
-// CHAIRPERSON ACTIONS
-// =======================================================
+
+// Chairperson action types
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DecadeOperationResult {
@@ -833,8 +815,9 @@ pub struct FinalizeElectionResponse {
     pub status: String,
 }
 
+// Chairperson action functions
+
 // Creates all on-chain ballots.
-// After this succeeds, the election is ready to receive votes.
 pub async fn create_ballots(public_key: String, secret_key: String) -> Result<String, String> {
     let admin_request =
         create_signed_admin_request(&public_key, &secret_key, "create_ballots", None)?;
@@ -862,8 +845,7 @@ pub async fn create_ballots(public_key: String, secret_key: String) -> Result<St
     }
 }
 
-// Closes the election.
-// After this succeeds, the API rejects new vote submissions.
+// Closes the election and rejects new votes.
 pub async fn close_election(
     _wallet_id: String,
     public_key: String,

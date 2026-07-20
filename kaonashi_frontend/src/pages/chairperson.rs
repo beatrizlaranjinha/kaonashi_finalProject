@@ -334,7 +334,7 @@ pub fn ChairpersonPage(
                                     if submitting.get() && current_step.get() == 4 {
                                         "Decrypting..."
                                     } else {
-                                        "Decrypt results / detect ties"
+                                        "Decrypt results"
                                     }
                                 }}
                             </button>

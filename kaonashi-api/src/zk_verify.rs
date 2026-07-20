@@ -111,9 +111,7 @@ fn challenge_sum_proof(
     Scalar::from_bytes_mod_order_wide(&wide)
 }
 
-// =======================================================
 // Verify one VoteProof
-// =======================================================
 
 pub fn verify_vote_proof(
     public_key: &ElGamalPubkey,

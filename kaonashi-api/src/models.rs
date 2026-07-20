@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-// =======================================================
-// VOTOS
-// =======================================================
+//votos
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RistrettoVoteProof {
@@ -63,9 +61,7 @@ pub struct SubmitVoteResponse {
     pub batch_submitted: bool,
 }
 
-// =======================================================
 // ELGAMAL KEY ENDPOINT
-// =======================================================
 
 #[derive(Debug, Serialize)]
 pub struct ElGamalPublicKeyResponse {
@@ -77,9 +73,7 @@ pub struct ElGamalPublicKeyResponse {
     pub public_key: Vec<u8>,
 }
 
-// =======================================================
 // AUTENTICAÇÃO
-// =======================================================
 
 #[derive(Debug, Deserialize)]
 pub struct ChallengeRequest {
@@ -112,9 +106,7 @@ pub struct AdminActionRequest {
     pub signature: String,
 }
 
-// =======================================================
 // BATCHES / MERKLE RECEIPTS
-// =======================================================
 
 #[derive(Debug, Clone)]
 pub struct PendingEncryptedVote {

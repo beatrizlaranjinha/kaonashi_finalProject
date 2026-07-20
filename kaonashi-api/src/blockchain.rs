@@ -15,10 +15,9 @@ use zk_client::solana_client::{
     submit_rollup_batch,
 };
 
-// ---------------------------------------------------
-// Submit rollup batch to Solana
-// ---------------------------------------------------
+// Rollup batches
 
+// Sends one encrypted batch tally to the Solana smart contract.
 pub fn submit_rollup_batch_to_blockchain(
     ballot: Pubkey,
     decade_id: u8,
@@ -49,10 +48,9 @@ pub fn submit_rollup_batch_to_blockchain(
     Ok(())
 }
 
-// ---------------------------------------------------
-// Create all ballots on-chain
-// ---------------------------------------------------
+// Ballot creation
 
+// Creates one on-chain ballot for each decade.
 pub fn create_all_ballots_on_chain(
     elgamal_public_keys_by_decade: Vec<[u8; 32]>,
 ) -> Result<Vec<(u8, Pubkey)>, String> {
@@ -74,6 +72,7 @@ pub fn create_all_ballots_on_chain(
 
         let ballot = Keypair::new();
 
+        // The encrypted tally starts with zero votes for every movie.
         let initial_values = vec![0_u64; movies.len()];
         let initial_encrypted_tally = encrypt_values(&initial_values, &elgamal_public_key);
 
@@ -99,10 +98,9 @@ pub fn create_all_ballots_on_chain(
     Ok(created_ballots)
 }
 
-// ---------------------------------------------------
-// Close one ballot on-chain
-// ---------------------------------------------------
+// Ballot closing
 
+// Closes one on-chain ballot.
 pub fn close_ballot_on_chain(ballot: Pubkey, decade_id: u8) -> Result<(), String> {
     let program = connect_localnet()
         .map_err(|error| format!("Failed to connect to Solana localnet: {}", error))?;
@@ -116,6 +114,7 @@ pub fn close_ballot_on_chain(ballot: Pubkey, decade_id: u8) -> Result<(), String
         Err(error) => {
             let error_text = error.to_string();
 
+            // If the ballot is already closed, we treat it as a successful close.
             if error_text.contains("ElectionNotOpen") || error_text.contains("Election is not open")
             {
                 println!(
@@ -134,10 +133,9 @@ pub fn close_ballot_on_chain(ballot: Pubkey, decade_id: u8) -> Result<(), String
     }
 }
 
-// ---------------------------------------------------
-// Fetch ballot state from Solana
-// ---------------------------------------------------
+// Ballot state
 
+// Fetches the current on-chain state of one ballot.
 pub fn get_ballot_state_from_blockchain(
     ballot: Pubkey,
     decade_id: u8,
@@ -164,10 +162,9 @@ pub fn get_ballot_state_from_blockchain(
     })
 }
 
-// ---------------------------------------------------
-// Finalize election from encrypted tally
-// ---------------------------------------------------
+// Election finalization
 
+// Decrypts the on-chain encrypted tally and sets the final winner.
 pub fn finalize_election_from_blockchain(
     ballot: Pubkey,
     decade_id: u8,
@@ -222,8 +219,10 @@ pub fn finalize_election_from_blockchain(
 
     let final_winner_index = if tie_indices.len() > 1 {
         match resolved_winner_index {
+            // The chairperson already resolved the tie.
             Some(index) if tie_indices.contains(&index) => index,
 
+            // The selected winner is invalid because it is not part of the tie.
             Some(index) => {
                 return Ok(FinalResultsResponse {
                     success: false,
@@ -240,6 +239,7 @@ pub fn finalize_election_from_blockchain(
                 });
             }
 
+            // The frontend must ask the chairperson to resolve the tie.
             None => {
                 println!(
                     "Tie detected for decade {}. Tied indices: {:?}. Results: {:?}",

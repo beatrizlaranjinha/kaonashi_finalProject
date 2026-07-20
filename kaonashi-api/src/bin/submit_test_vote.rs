@@ -65,30 +65,78 @@ struct SubmitVoteResponse {
     status: String,
 }
 
+#[derive(Debug, Serialize)]
+struct AdminActionRequest {
+    public_key: String,
+    message: String,
+    signature: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ResolveTieRequest {
+    public_key: String,
+    message: String,
+    signature: String,
+    decade_id: u8,
+    winner_index: usize,
+}
+
 fn main() -> Result<()> {
     let decade_id = env::args()
         .nth(1)
         .unwrap_or_else(|| "2".to_string())
         .parse::<u8>()
-        .context("Usage: cargo run --bin submit_test_votes -- <decade_id>")?;
+        .context("Usage: cargo run --bin submit_test_vote -- <decade_id>")?;
+
+    let chairperson_secret_key =
+        env::var("CHAIRPERSON_SECRET_KEY").context("Missing CHAIRPERSON_SECRET_KEY")?;
+
+    let chairperson_public_key = env::var("CHAIRPERSON_PUBLIC_KEY").unwrap_or_else(|_| {
+        keypair_from_secret(&chairperson_secret_key)
+            .expect("Invalid chairperson secret key")
+            .pubkey()
+            .to_string()
+    });
 
     let client = Client::new();
+
+    println!("Starting Kaonashi Scales Up test");
+    println!("Decade id: {decade_id}");
+    println!("Chairperson: {chairperson_public_key}");
+
+    create_ballots(&client, &chairperson_public_key, &chairperson_secret_key)?;
 
     let wallets_json = fs::read_to_string(WALLETS_FILE)
         .with_context(|| format!("Failed to read {WALLETS_FILE}"))?;
 
     let wallets: Vec<WalletRecord> = serde_json::from_str(&wallets_json)?;
 
+    if wallets.len() < 10 {
+        anyhow::bail!("This test needs at least 10 wallets");
+    }
+
     let public_key = get_elgamal_public_key(&client, decade_id)?;
 
-    for (index, wallet) in wallets.iter().enumerate() {
-        let movie_index = index % 8;
+    // 10 votes with a tie:
+    // movie 0 -> 3 votes
+    // movie 1 -> 3 votes
+    // movie 2 -> 2 votes
+    // movie 3 -> 2 votes
+    let planned_votes = [0usize, 1, 0, 1, 2, 3, 0, 1, 2, 3];
 
-        let response = submit_one_vote(&client, wallet, &public_key, decade_id, movie_index)?;
+    println!("\nSubmitting 10 encrypted votes");
+    println!("Expected tie: movie 0 = 3 votes, movie 1 = 3 votes");
+
+    for (index, movie_index) in planned_votes.iter().enumerate() {
+        let wallet = &wallets[index];
+
+        let response = submit_one_vote(&client, wallet, &public_key, decade_id, *movie_index)?;
 
         println!(
-            "{} -> accepted={}, pending_votes={}, batch_submitted={}, status={}",
+            "Vote {} -> {} voted for movie {} | accepted={}, pending_votes={}, batch_submitted={}, status={}",
+            index + 1,
             wallet.wallet_id,
+            movie_index,
             response.accepted,
             response.pending_votes,
             response.batch_submitted,
@@ -96,7 +144,238 @@ fn main() -> Result<()> {
         );
     }
 
+    println!("\nExpected result before tie resolution:");
+    println!("movie 0 -> 3 votes");
+    println!("movie 1 -> 3 votes");
+    println!("movie 2 -> 2 votes");
+    println!("movie 3 -> 2 votes");
+
+    close_election(&client, &chairperson_public_key, &chairperson_secret_key)?;
+
+    flush_batch(
+        &client,
+        &chairperson_public_key,
+        &chairperson_secret_key,
+        decade_id,
+    )?;
+
+    finalize_election(&client, &chairperson_public_key, &chairperson_secret_key)?;
+
+    get_results(&client, decade_id)?;
+
+    // Tie resolution: chairperson chooses movie 1.
+    resolve_tie(
+        &client,
+        &chairperson_public_key,
+        &chairperson_secret_key,
+        decade_id,
+        1,
+    )?;
+
+    finalize_election(&client, &chairperson_public_key, &chairperson_secret_key)?;
+
+    get_results(&client, decade_id)?;
+
+    println!("\nKaonashi Scales Up test completed");
+    println!("Final winner selected by chairperson: movie 1");
+
     Ok(())
+}
+
+fn keypair_from_secret(secret_key: &str) -> Result<Keypair> {
+    let keypair_bytes = bs58::decode(secret_key.trim()).into_vec()?;
+
+    Keypair::try_from(keypair_bytes.as_slice())
+        .map_err(|error| anyhow::anyhow!("Invalid chairperson keypair: {error}"))
+}
+
+fn create_admin_message(public_key: &str, action: &str, decade_id: Option<u8>) -> String {
+    match decade_id {
+        Some(decade_id) => format!(
+            "Kaonashi admin action\npublic_key: {}\naction: {}\ndecade_id: {}",
+            public_key, action, decade_id
+        ),
+        None => format!(
+            "Kaonashi admin action\npublic_key: {}\naction: {}",
+            public_key, action
+        ),
+    }
+}
+
+fn create_signed_admin_request(
+    public_key: &str,
+    secret_key: &str,
+    action: &str,
+    decade_id: Option<u8>,
+) -> Result<AdminActionRequest> {
+    let message = create_admin_message(public_key, action, decade_id);
+
+    let keypair = keypair_from_secret(secret_key)?;
+    let signature = keypair.sign_message(message.as_bytes()).to_string();
+
+    Ok(AdminActionRequest {
+        public_key: public_key.to_string(),
+        message,
+        signature,
+    })
+}
+
+fn post_admin(
+    client: &Client,
+    endpoint: &str,
+    body: &AdminActionRequest,
+    label: &str,
+) -> Result<()> {
+    let response = client
+        .post(format!("{API_BASE_URL}{endpoint}"))
+        .json(body)
+        .send()?
+        .error_for_status()?;
+
+    let text = response.text().unwrap_or_default();
+
+    println!("\n{label} completed");
+
+    if !text.trim().is_empty() {
+        println!("{text}");
+    }
+
+    Ok(())
+}
+
+fn get_api(client: &Client, endpoint: &str, label: &str) -> Result<()> {
+    let response = client
+        .get(format!("{API_BASE_URL}{endpoint}"))
+        .send()?
+        .error_for_status()?;
+
+    let text = response.text().unwrap_or_default();
+
+    println!("\n{label}:");
+
+    if !text.trim().is_empty() {
+        println!("{text}");
+    }
+
+    Ok(())
+}
+
+fn create_ballots(
+    client: &Client,
+    chairperson_public_key: &str,
+    chairperson_secret_key: &str,
+) -> Result<()> {
+    let body = create_signed_admin_request(
+        chairperson_public_key,
+        chairperson_secret_key,
+        "create_ballots",
+        None,
+    )?;
+
+    post_admin(client, "/api/admin/create-ballots", &body, "Create ballots")
+}
+
+fn close_election(
+    client: &Client,
+    chairperson_public_key: &str,
+    chairperson_secret_key: &str,
+) -> Result<()> {
+    let body = create_signed_admin_request(
+        chairperson_public_key,
+        chairperson_secret_key,
+        "close_election",
+        None,
+    )?;
+
+    post_admin(client, "/api/admin/close-election", &body, "Close election")
+}
+
+fn flush_batch(
+    client: &Client,
+    chairperson_public_key: &str,
+    chairperson_secret_key: &str,
+    decade_id: u8,
+) -> Result<()> {
+    let body = create_signed_admin_request(
+        chairperson_public_key,
+        chairperson_secret_key,
+        "flush_batch",
+        Some(decade_id),
+    )?;
+
+    post_admin(
+        client,
+        &format!("/api/admin/flush-batch/{decade_id}"),
+        &body,
+        "Flush batch",
+    )
+}
+
+fn finalize_election(
+    client: &Client,
+    chairperson_public_key: &str,
+    chairperson_secret_key: &str,
+) -> Result<()> {
+    let body = create_signed_admin_request(
+        chairperson_public_key,
+        chairperson_secret_key,
+        "finalize_election",
+        None,
+    )?;
+
+    post_admin(
+        client,
+        "/api/admin/finalize-election",
+        &body,
+        "Finalize election",
+    )
+}
+
+fn resolve_tie(
+    client: &Client,
+    chairperson_public_key: &str,
+    chairperson_secret_key: &str,
+    decade_id: u8,
+    winner_index: usize,
+) -> Result<()> {
+    let admin_request = create_signed_admin_request(
+        chairperson_public_key,
+        chairperson_secret_key,
+        "resolve_tie",
+        Some(decade_id),
+    )?;
+
+    let body = ResolveTieRequest {
+        public_key: admin_request.public_key,
+        message: admin_request.message,
+        signature: admin_request.signature,
+        decade_id,
+        winner_index,
+    };
+
+    let response = client
+        .post(format!("{API_BASE_URL}/api/admin/resolve-tie"))
+        .json(&body)
+        .send()?
+        .error_for_status()?;
+
+    let text = response.text().unwrap_or_default();
+
+    println!("\nResolve tie completed");
+
+    if !text.trim().is_empty() {
+        println!("{text}");
+    }
+
+    Ok(())
+}
+
+fn get_results(client: &Client, decade_id: u8) -> Result<()> {
+    get_api(
+        client,
+        &format!("/api/results/{decade_id}"),
+        "Election results",
+    )
 }
 
 fn get_elgamal_public_key(client: &Client, decade_id: u8) -> Result<ElGamalPubkey> {
