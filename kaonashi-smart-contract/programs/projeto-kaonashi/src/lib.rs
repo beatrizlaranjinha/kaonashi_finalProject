@@ -2,10 +2,12 @@ use anchor_lang::prelude::*;
 
 pub mod crypto;
 pub mod election;
+pub mod proofs;
 pub mod rollups;
 
 use crypto::{encrypted_tally_after_vote, validate_ciphertexts, validate_public_key};
 use election::ELECTION_OPEN;
+use proofs::verify_encrypted_vote_proofs;
 
 declare_id!("4ybufDXMBSQpQ6kxGqEud9afLC9ayoN925Fk6SkAJxx7");
 
@@ -17,12 +19,23 @@ pub const NO_VOTE: u8 = u8::MAX;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct VoteProof {
-    pub is_binary: bool,
+    pub a0: [u8; 32],
+    pub b0: [u8; 32],
+    pub c0: [u8; 32],
+    pub s0: [u8; 32],
+
+    pub a1: [u8; 32],
+    pub b1: [u8; 32],
+    pub c1: [u8; 32],
+    pub s1: [u8; 32],
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct VoteSumProof {
-    pub sum_is_one: bool,
+    pub a: [u8; 32],
+    pub b: [u8; 32],
+    pub c: [u8; 32],
+    pub s: [u8; 32],
 }
 
 #[program]
@@ -291,16 +304,32 @@ fn validate_cast_vote(
     election::ensure_open(ballot)?;
 
     require!(voter_record.can_vote, ErrorCode::NotAllowedToVote);
+
     require!(!voter_record.has_voted, ErrorCode::AlreadyVoted);
+
     require!(
         ballot.is_valid_proposal_index(vote_index),
         ErrorCode::InvalidProposalIndex
     );
 
     validate_tally_size(ballot.proposal_count as usize, encrypted_vote.len())?;
+
     validate_ciphertexts(encrypted_vote)?;
-    validate_vote_proofs(vote_proofs, encrypted_vote.len())?;
-    validate_vote_sum_proof(vote_sum_proof)?;
+
+    verify_encrypted_vote_proofs(
+        &ballot.public_key,
+        encrypted_vote,
+        vote_proofs,
+        vote_sum_proof,
+    )
+    .map_err(|verification_error| {
+        msg!(
+            "Encrypted vote proof verification failed: {}",
+            verification_error
+        );
+
+        error!(ErrorCode::InvalidVoteProof)
+    })?;
 
     Ok(())
 }
@@ -323,25 +352,6 @@ fn validate_proposals(proposals: &[String]) -> Result<()> {
 
 fn validate_tally_size(expected: usize, actual: usize) -> Result<()> {
     require!(expected == actual, ErrorCode::InvalidTallySize);
-    Ok(())
-}
-
-fn validate_vote_proofs(vote_proofs: &[VoteProof], encrypted_vote_len: usize) -> Result<()> {
-    require!(
-        vote_proofs.len() == encrypted_vote_len,
-        ErrorCode::InvalidVoteProof
-    );
-
-    require!(
-        vote_proofs.iter().all(|proof| proof.is_binary),
-        ErrorCode::InvalidVoteProof
-    );
-
-    Ok(())
-}
-
-fn validate_vote_sum_proof(vote_sum_proof: &VoteSumProof) -> Result<()> {
-    require!(vote_sum_proof.sum_is_one, ErrorCode::InvalidVoteSumProof);
     Ok(())
 }
 
